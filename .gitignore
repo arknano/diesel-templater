@@ -1,0 +1,6 @@
+/export
+/dist
+/example/export
+/__pycache__
+/.vs
+/.uv-cache
