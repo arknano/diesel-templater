@@ -12,18 +12,16 @@ Using a configurable template marker like `%template_name%`, you can easily inse
 Build the included example:
 
 ```bash
-python diesel.py example/diesel.config
+python diesel.py --config example/diesel.config
 ```
 
 The default output folder is `export/` next to `diesel.py`.
-
-To choose a different output folder, pass it as the second argument:
-
-```bash
-python diesel.py example/diesel.config "D:\Web\my-cool-website"
-```
-
 The export folder is deleted and rebuilt on every run.
+
+## Arguments
+- `--config`: Specify the config file. If not provided, uses `diesel.config` in the current directory.
+- `--export_dir`: Specify the export directory. If not provided, exports to `export/` in the current directory.
+  
 
 ## Configuration
 
@@ -46,8 +44,6 @@ Options:
 - `template_pattern`: regex used to find template markers. The first capture group is used as the template name.
 - `exclude_dirs`: directory names to skip while copying.
 - `exclude_files`: filenames, source-relative paths, or glob patterns to skip, such as `README.md`, `pages/draft.html`, or `*.tmp`.
-
-The export directory is a command-line option, not a config value.
 
 ## Templates
 

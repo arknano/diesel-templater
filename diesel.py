@@ -244,12 +244,14 @@ def parse_args() -> argparse.Namespace:
         description="Build a static HTML site from reusable template snippets."
     )
     parser.add_argument(
-        'config',
+        '--config',
+        type=str,
+        default="local",
         help="Path to the JSON config file.",
     )
     parser.add_argument(
-        'export_dir',
-        nargs='?',
+        '--export_dir',
+        type=str,
         default=DEFAULT_EXPORT_DIR,
         help="Output directory. Defaults to export/ next to diesel.py.",
     )
@@ -261,6 +263,14 @@ def main() -> None:
     args = parse_args()
 
     try:
+        if args.config == "local":
+            local_config_path = os.path.join(SCRIPT_DIR, 'diesel.config')
+            if not os.path.exists(local_config_path):
+                raise FileNotFoundError(
+                    f"No local config found at {local_config_path}. "
+                    "Please provide a config file path or create diesel.config in the script directory."
+                )
+            args.config = local_config_path
         config = load_config(args.config, os.path.abspath(args.export_dir))
         validate_export_dir(config)
 
