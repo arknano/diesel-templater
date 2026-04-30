@@ -19,7 +19,6 @@ import re
 import json
 import fnmatch
 import argparse
-import html
 from urllib import error, request
 from typing import Dict, Any, Optional
 
@@ -33,6 +32,8 @@ DEFAULT_CONFIG = {
     'template_dir': 'site/templates',
     'source_dir': 'site',
     'template_pattern': r'%(\w+)%',
+    'markdown_template': None,
+    'markdown_content_marker': '{{markdown}}',
     'exclude_dirs': ['templates'],
     'exclude_files': []
 }
@@ -59,9 +60,11 @@ def load_config(config_path: str, export_dir: Optional[str] = None) -> Dict[str,
     config['export_dir'] = export_dir or DEFAULT_EXPORT_DIR
 
     # Convert relative paths to absolute
-    for key in ['template_dir', 'source_dir']:
+    for key in ['template_dir', 'source_dir', 'markdown_template']:
         if key in config:
             path = config[key]
+            if path is None:
+                continue
             if not os.path.isabs(path):
                 config[key] = os.path.join(config_dir, path)
             else:
@@ -201,38 +204,20 @@ def render_github_markdown(text: str) -> str:
         raise Exception(f"GitHub Markdown API error: {e.code} - {response_text}")
 
 
-def get_markdown_title(markdown_content: str, fallback: str) -> str:
-    """Return the first top-level Markdown heading, or a fallback title."""
-    for line in markdown_content.splitlines():
-        match = re.match(r'^#\s+(.+)$', line)
-        if match:
-            return match.group(1).strip()
+def apply_markdown_template(markdown_html: str, template_path: str, content_marker: str) -> str:
+    """Insert rendered Markdown HTML into a page template."""
+    if not os.path.exists(template_path):
+        raise FileNotFoundError(f"Markdown template not found: {template_path}")
 
-    return fallback
+    with open(template_path, 'r') as f:
+        template_content = f.read()
 
+    if content_marker not in template_content:
+        raise ValueError(
+            f"Markdown template must include the content marker: {content_marker}"
+        )
 
-def wrap_markdown_html(html_content: str, title: str) -> str:
-    """Wrap rendered Markdown in the same HTML structure as normal pages."""
-    escaped_title = html.escape(title, quote=True)
-    return f"""<!DOCTYPE html>
-<html>
-
-<head>
-    %style%
-    <title>{escaped_title} - Diesel Templater</title>
-</head>
-
-<body>
-    %header%
-    <main>
-        <section>
-{html_content}
-        </section>
-    </main>
-</body>
-
-</html>
-"""
+    return template_content.replace(content_marker, markdown_html)
 
 
 def is_excluded_file(file_name: str, rel_path: str, exclude_files: list) -> bool:
@@ -273,8 +258,12 @@ def copy_site_files(source_dir: str, export_dir: str, exclude_dirs: list, exclud
             shutil.copy2(source_path, export_path)
 
 
-def process_markdown_files(export_dir: str) -> None:
+def process_markdown_files(config: Dict[str, Any]) -> None:
     """Convert Markdown files in export directory to HTML files."""
+    export_dir = config['export_dir']
+    markdown_template = config.get('markdown_template')
+    markdown_content_marker = config.get('markdown_content_marker', '{{markdown}}')
+
     markdown_files = []
     for root, dirs, files in os.walk(export_dir):
         markdown_files.extend(
@@ -286,13 +275,20 @@ def process_markdown_files(export_dir: str) -> None:
             with open(filepath, 'r') as f:
                 content = f.read()
 
-            fallback_title = os.path.splitext(os.path.basename(filepath))[0].replace('-', ' ').title()
-            title = get_markdown_title(content, fallback_title)
-            html_content = wrap_markdown_html(render_github_markdown(content), title)
+            html_content = render_github_markdown(content)
+            if markdown_template:
+                html_content = apply_markdown_template(
+                    html_content,
+                    markdown_template,
+                    markdown_content_marker,
+                )
+
             html_filepath = os.path.splitext(filepath)[0] + '.html'
 
             with open(html_filepath, 'w') as f:
                 f.write(html_content)
+
+            os.remove(filepath)
 
             rel_path = os.path.relpath(filepath, export_dir)
             html_rel_path = os.path.relpath(html_filepath, export_dir)
@@ -392,7 +388,7 @@ def main() -> None:
 
         if args.md:
             print("\nProcessing markdown...")
-            process_markdown_files(export_dir)
+            process_markdown_files(config)
 
         # Process templates
         print("\nProcessing templates...")
