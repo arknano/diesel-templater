@@ -19,6 +19,8 @@ import re
 import json
 import fnmatch
 import argparse
+import html
+from urllib import error, request
 from typing import Dict, Any, Optional
 
 
@@ -172,6 +174,67 @@ def process_templates(content: str, template_dir: str, template_pattern: str, fi
     return template_regex.sub(replace_template, content)
 
 
+def render_github_markdown(text: str) -> str:
+    """Render Markdown to HTML using GitHub's Markdown API."""
+    url = "https://api.github.com/markdown"
+    payload = {
+        "text": text,
+        "mode": "gfm"
+    }
+
+    data = json.dumps(payload).encode("utf-8")
+    req = request.Request(
+        url,
+        data=data,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with request.urlopen(req) as response:
+            return response.read().decode("utf-8")
+    except error.HTTPError as e:
+        response_text = e.read().decode("utf-8")
+        raise Exception(f"GitHub Markdown API error: {e.code} - {response_text}")
+
+
+def get_markdown_title(markdown_content: str, fallback: str) -> str:
+    """Return the first top-level Markdown heading, or a fallback title."""
+    for line in markdown_content.splitlines():
+        match = re.match(r'^#\s+(.+)$', line)
+        if match:
+            return match.group(1).strip()
+
+    return fallback
+
+
+def wrap_markdown_html(html_content: str, title: str) -> str:
+    """Wrap rendered Markdown in the same HTML structure as normal pages."""
+    escaped_title = html.escape(title, quote=True)
+    return f"""<!DOCTYPE html>
+<html>
+
+<head>
+    %style%
+    <title>{escaped_title} - Diesel Templater</title>
+</head>
+
+<body>
+    %header%
+    <main>
+        <section>
+{html_content}
+        </section>
+    </main>
+</body>
+
+</html>
+"""
+
+
 def is_excluded_file(file_name: str, rel_path: str, exclude_files: list) -> bool:
     """Return whether a file matches an exclude_files entry."""
     normalized_rel_path = rel_path.replace(os.sep, '/')
@@ -208,6 +271,35 @@ def copy_site_files(source_dir: str, export_dir: str, exclude_dirs: list, exclud
             # Ensure destination directory exists
             os.makedirs(os.path.dirname(export_path), exist_ok=True)
             shutil.copy2(source_path, export_path)
+
+
+def process_markdown_files(export_dir: str) -> None:
+    """Convert Markdown files in export directory to HTML files."""
+    markdown_files = []
+    for root, dirs, files in os.walk(export_dir):
+        markdown_files.extend(
+            os.path.join(root, f) for f in files if f.lower().endswith('.md')
+        )
+
+    for filepath in markdown_files:
+        try:
+            with open(filepath, 'r') as f:
+                content = f.read()
+
+            fallback_title = os.path.splitext(os.path.basename(filepath))[0].replace('-', ' ').title()
+            title = get_markdown_title(content, fallback_title)
+            html_content = wrap_markdown_html(render_github_markdown(content), title)
+            html_filepath = os.path.splitext(filepath)[0] + '.html'
+
+            with open(html_filepath, 'w') as f:
+                f.write(html_content)
+
+            rel_path = os.path.relpath(filepath, export_dir)
+            html_rel_path = os.path.relpath(html_filepath, export_dir)
+            print(f"Successfully processed {rel_path} -> {html_rel_path}")
+
+        except Exception as e:
+            print(f"Error processing {filepath}: {str(e)}")
 
 
 def process_html_files(config: Dict[str, Any]) -> None:
@@ -255,6 +347,11 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_EXPORT_DIR,
         help="Output directory. Defaults to export/ next to diesel.py.",
     )
+    parser.add_argument(
+        '--md',
+        action='store_true',
+        help="Process markdown files in the source directory and convert them to HTML.",
+    )
     return parser.parse_args()
 
 
@@ -292,6 +389,10 @@ def main() -> None:
         # Copy all site files
         print("Copying site files...")
         copy_site_files(source_dir, export_dir, exclude_dirs, exclude_files)
+
+        if args.md:
+            print("\nProcessing markdown...")
+            process_markdown_files(export_dir)
 
         # Process templates
         print("\nProcessing templates...")
